@@ -1,4 +1,4 @@
-interface: null
+interface: eth0
 learning_window_seconds: 60
 learning_confirmations: 2
 whitelisted_ips: []
