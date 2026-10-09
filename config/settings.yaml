@@ -1,0 +1,11 @@
+interface: null
+learning_window_seconds: 60
+learning_confirmations: 2
+whitelisted_ips: []
+whitelisted_macs: []
+multi_ip_mac_exceptions: []
+burst_threshold: 5
+burst_window_seconds: 10
+alert_cooldown_seconds: 30
+log_file: logs/arp_alerts.jsonl
+log_level: INFO
