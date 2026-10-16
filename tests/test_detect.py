@@ -1,4 +1,7 @@
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
+
+import pytest
 
 from detector.baseline import Baseline
 from detector.config import DetectorConfig, load_config
@@ -126,6 +129,38 @@ def test_recurring_alert_returns_after_cooldown(tmp_path):
     assert len(recurring) == 1
 
 
+def test_alert_callback_receives_alert_and_can_be_unregistered(tmp_path):
+    engine = DetectionEngine(config(tmp_path))
+    received = []
+    remove = engine.on_alert(received.append)
+
+    engine.process_packet(packet())
+    engine.process_packet(packet())
+    engine.process_packet(packet(mac="aa:bb:cc:dd:ee:02"))
+    assert len(received) == 1
+
+    remove()
+    engine.process_packet(packet(mac="aa:bb:cc:dd:ee:03"))
+    assert len(received) == 1
+
+
+def test_callback_failure_does_not_block_other_callbacks(tmp_path):
+    engine = DetectionEngine(config(tmp_path))
+    received = []
+
+    def failing_callback(event):
+        raise RuntimeError("callback failed")
+
+    engine.on_alert(failing_callback)
+    engine.on_alert(received.append)
+    engine.process_packet(packet())
+    engine.process_packet(packet())
+
+    events = engine.process_packet(packet(mac="aa:bb:cc:dd:ee:02"))
+    assert len(events) == 1
+    assert received == events
+
+
 def test_malformed_and_requests_are_ignored(tmp_path):
     engine = DetectionEngine(config(tmp_path))
     assert engine.process_packet(SimpleNamespace()) == []
@@ -171,6 +206,68 @@ def test_sniffer_reports_capture_errors_and_stops_cleanly(tmp_path):
         raise KeyboardInterrupt
 
     Sniffer(engine, interface="test0", sniff_func=interrupted).start()
+
+
+def test_sniffer_forwards_packets_and_capture_options(tmp_path):
+    engine = DetectionEngine(config(tmp_path, interface="test0"))
+    captured = {}
+    forwarded = []
+
+    def fake_process(packet_value, now=None):
+        forwarded.append(packet_value)
+        return []
+
+    engine.process_packet = fake_process
+
+    def fake_sniff(**kwargs):
+        captured.update(kwargs)
+        kwargs["prn"]("captured packet")
+
+    Sniffer(engine, sniff_func=fake_sniff).start()
+
+    assert captured["iface"] == "test0"
+    assert captured["filter"] == "arp"
+    assert captured["store"] is False
+    assert forwarded == ["captured packet"]
+
+
+@pytest.mark.parametrize("interface", [None, ""])
+def test_sniffer_requires_interface(tmp_path, interface):
+    engine = DetectionEngine(config(tmp_path, interface=None))
+
+    with pytest.raises(RuntimeError, match="No network interface configured"):
+        Sniffer(engine, interface=interface).start()
+
+
+def test_sniffer_rejects_invalid_interface_without_capture(tmp_path, monkeypatch):
+    scapy_all = ModuleType("scapy.all")
+    scapy_all.get_if_list = lambda: ["eth0"]
+    scapy_all.sniff = lambda **kwargs: None
+    scapy = ModuleType("scapy")
+    scapy.all = scapy_all
+    monkeypatch.setitem(sys.modules, "scapy", scapy)
+    monkeypatch.setitem(sys.modules, "scapy.all", scapy_all)
+    engine = DetectionEngine(config(tmp_path, interface="missing0"))
+
+    with pytest.raises(RuntimeError, match="Invalid network interface 'missing0'"):
+        Sniffer(engine).start()
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (OSError("device unavailable"), "Unable to capture on interface 'test0'"),
+        (RuntimeError("unexpected failure"), "ARP capture failed on interface 'test0'"),
+    ],
+)
+def test_sniffer_wraps_capture_failures(tmp_path, failure, message):
+    engine = DetectionEngine(config(tmp_path))
+
+    def failing_sniff(**kwargs):
+        raise failure
+
+    with pytest.raises(RuntimeError, match=message):
+        Sniffer(engine, interface="test0", sniff_func=failing_sniff).start()
 
 
 def test_yaml_configuration_loads():
