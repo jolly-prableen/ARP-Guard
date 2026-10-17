@@ -5,20 +5,19 @@ import logging
 from detector.config import load_config
 from detector.detect import DetectionEngine
 from detector.sniffer import Sniffer
+# Person B notification integration
+from alerts.notifier import trigger_alert
 
 
 def show_alert(event: dict[str, object]) -> None:
-    """Display a detected ARP alert."""
-    print(
-        "\nARP ALERT"
-        f"\n  Timestamp: {event.get('timestamp')}"
-        f"\n  Suspicious IP: {event.get('suspicious_ip')}"
-        f"\n  Old MAC: {event.get('old_mac')}"
-        f"\n  New MAC: {event.get('new_mac')}"
-        f"\n  Reason: {event.get('reason')}"
-        f"\n  Severity: {event.get('severity')}",
-        flush=True,
-    )
+    """Display a detected ARP alert using Person B's notification system."""
+    suspicious_ip = str(event.get('suspicious_ip'))
+    old_mac = str(event.get('old_mac'))
+    new_mac = str(event.get('new_mac'))
+    reason = str(event.get('reason', 'ARP Spoofing Detected'))
+
+    # Call Person B's console colorizer, file logger, and desktop popup!
+    trigger_alert(suspicious_ip, old_mac, new_mac, reason=reason)
 
 
 def main() -> int:
