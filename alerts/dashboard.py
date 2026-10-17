@@ -1,33 +1,21 @@
 # alerts/dashboard.py
-from rich.console import Console
-from rich.table import Table
+from flask import Flask, render_template
 
-console = Console()
+app = Flask(__name__)
 
-def render_cli_dashboard(trusted_table, alert_history):
-    """
-    Displays a live-updating CLI table showing current IP-to-MAC trust mappings 
-    and recent security alerts.
-    """
-    # Clear the terminal screen for a clean dashboard view
-    console.clear()
-    
-    # Build a formatted table using the 'rich' library
-    table = Table(title="🛡️ ARP Guard - Live Network Monitor")
-    table.add_column("IP Address", style="cyan", no_wrap=True)
-    table.add_column("MAC Address", style="magenta")
-    table.add_column("Status", style="green")
+# Sample mock data for standalone testing (will link with Person A's engine later)
+trusted_devices = {
+    "192.168.1.1": "AA:BB:CC:DD:EE:FF",  # Router
+    "192.168.1.15": "11:22:33:44:55:66" # Victim VM
+}
 
-    # Loop through trusted devices and add rows to the table
-    for ip, mac in trusted_table.items():
-        table.add_row(ip, mac, "Trusted")
-        
-    # Print the table and total alert counters to the console
-    console.print(table)
-    console.print(f"\n[bold red]Total Alerts Fired:[/bold red] {len(alert_history)}")
-    
-    # Show the last 5 alerts if any have occurred
-    if alert_history:
-        console.print("\n[yellow]Recent Alerts:[/yellow]")
-        for alert in alert_history[-5:]:
-            console.print(f" - {alert}")
+alert_history = [
+    "2026-10-17 23:15:00 - WARNING: IP 192.168.1.15 MAC changed unexpectedly!"
+]
+
+@app.route('/')
+def index():
+    return render_template('index.html', devices=trusted_devices, alerts=alert_history)
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
