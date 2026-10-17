@@ -3,53 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ARP Guard - Web Dashboard</title>
-    <!-- Bootstrap CSS for clean, modern styling -->
+    <title>ARP-Guard | Security Operations Center</title>
+    <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Auto-refresh page every 3 seconds for live monitoring -->
+    <meta http-equiv="refresh" content="3">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        .card { background-color: #1e293b; border: 1px solid #334155; color: #f8fafc; }
+        .table { color: #f8fafc; }
+        .table-striped > tbody > tr:nth-of-type(odd) { background-color: #273548; color: #f8fafc; }
+        .badge-live { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    </style>
 </head>
-<body class="bg-light">
-    <div class="container mt-5">
-        <h1 class="text-danger mb-4">🛡️ ARP Guard - Live Security Dashboard</h1>
-        
-        <div class="row">
-            <!-- Trusted Devices Table -->
+<body>
+    <div class="container py-5">
+        <!-- Header Section -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="fw-bold text-danger">🛡️ ARP-Guard SOC</h1>
+                <p class="text-muted mb-0">Real-Time Local Network Intrusion Detection System</p>
+            </div>
+            <div>
+                <span class="badge bg-success badge-live fs-6 p-2">● SYSTEM LIVE & MONITORING</span>
+            </div>
+        </div>
+
+        <!-- Quick Stats Row -->
+        <div class="row g-4 mb-4">
             <div class="col-md-6">
-                <div class="card shadow p-4 mb-4">
-                    <h3>Trusted Network Devices</h3>
-                    <table class="table table-striped mt-3">
-                        <thead>
-                            <tr>
-                                <th>IP Address</th>
-                                <th>MAC Address</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for ip, mac in devices.items() %}
-                            <tr>
-                                <td>{{ ip }}</td>
-                                <td><code>{{ mac }}</code></td>
-                                <td><span class="badge bg-success">Trusted</span></td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <div class="card p-3 shadow-sm border-start border-primary border-4">
+                    <h6 class="text-muted">Trusted Devices Tracked</h6>
+                    <h3 class="fw-bold">{{ devices|length }}</h3>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card p-3 shadow-sm border-start border-danger border-4">
+                    <h6 class="text-muted">Total Security Alerts</h6>
+                    <h3 class="fw-bold text-danger">{{ alerts|length }}</h3>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- Trusted Devices Table -->
+            <div class="col-lg-6">
+                <div class="card shadow p-4 h-100">
+                    <h4 class="mb-3 text-info">🔒 Trusted Network Mappings</h4>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr class="text-secondary">
+                                    <th>IP Address</th>
+                                    <th>MAC Address</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ip, mac in devices.items() %}
+                                <tr>
+                                    <td><code class="text-info">{{ ip }}</code></td>
+                                    <td><code class="text-warning">{{ mac }}</code></td>
+                                    <td><span class="badge bg-success">Trusted</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- Alert History Panel -->
-            <div class="col-md-6">
-                <div class="card shadow p-4 mb-4">
-                    <h3>Alert History (<span class="text-danger">{{ alerts|length }}</span>)</h3>
-                    <ul class="list-group mt-3">
+            <!-- Threat Alert History Panel -->
+            <div class="col-lg-6">
+                <div class="card shadow p-4 h-100">
+                    <h4 class="mb-3 text-danger">🚨 Threat Alert Log</h4>
+                    <div class="alert-box overflow-auto" style="max-height: 250px;">
                         {% if alerts %}
-                            {% for alert in alerts %}
-                            <li class="list-group-item list-group-item-danger">{{ alert }}</li>
-                            {% endfor %}
+                            <ul class="list-group list-group-flush bg-transparent">
+                                {% for alert in alerts %}
+                                <li class="list-group-item bg-dark text-danger border-secondary mb-2 rounded shadow-sm">
+                                    <small>⚠️ {{ alert }}</small>
+                                </li>
+                                {% endfor %}
+                            </ul>
                         {% else %}
-                            <li class="list-group-item text-muted">No attacks detected yet. Network is secure!</li>
+                            <div class="text-center py-5 text-muted">
+                                <p class="mb-0">✅ No ARP spoofing attacks detected. Network secure.</p>
+                            </div>
                         {% endif %}
-                    </ul>
+                    </div>
                 </div>
             </div>
         </div>
