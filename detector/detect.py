@@ -1,14 +1,18 @@
-"""ARP packet analysis, alert suppression, and JSONL logging."""
+"""ARP packet analysis, alert suppression, callbacks, and JSONL logging."""
 
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 from time import monotonic
 from typing import Any, Callable
 
 from .baseline import Baseline, normalize_mac
 from .config import DetectorConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 class DetectionEngine:
@@ -19,6 +23,7 @@ class DetectionEngine:
         config: DetectorConfig | None = None,
         baseline: Baseline | None = None,
         clock=monotonic,
+        simulated: bool = False,
     ) -> None:
         self.config = config or DetectorConfig()
         self.baseline = baseline or Baseline(
@@ -29,6 +34,7 @@ class DetectionEngine:
             clock=clock,
         )
         self._clock = clock
+        self._simulated = simulated
         self._callbacks: list[Callable[[dict[str, Any]], None]] = []
         self._last_alerts: dict[tuple[Any, ...], float] = {}
         self._mac_to_ips: dict[str, set[str]] = defaultdict(set)
@@ -42,6 +48,7 @@ class DetectionEngine:
             path.parent.mkdir(parents=True, exist_ok=True)
             return path
         except OSError:
+            logger.exception("Unable to create detector event log at %s", self.config.log_file)
             return None
 
     def on_alert(self, callback: Callable[[dict[str, Any]], None]) -> Callable[[], None]:
@@ -118,6 +125,7 @@ class DetectionEngine:
             "new_mac": new_mac,
             "reason": reason,
             "severity": severity,
+            "simulated": self._simulated,
         }
 
     def _emit_if_allowed(self, event: dict[str, Any], now: float) -> bool:
@@ -131,6 +139,7 @@ class DetectionEngine:
             try:
                 callback(event)
             except Exception:
+                logger.exception("Alert callback failed")
                 continue
         return True
 
@@ -141,4 +150,5 @@ class DetectionEngine:
             with self._logger.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(event, sort_keys=True) + "\n")
         except OSError:
+            logger.exception("Unable to write detector event log at %s", self._logger)
             return

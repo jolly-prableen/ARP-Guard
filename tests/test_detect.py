@@ -3,6 +3,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+import main as cli
 from detector.baseline import Baseline
 from detector.config import DetectorConfig, load_config
 from detector.detect import DetectionEngine
@@ -24,6 +25,21 @@ def config(tmp_path, **kwargs):
     )
     values.update(kwargs)
     return DetectorConfig(**values)
+
+
+VALID_CONFIG = """\
+interface: test0
+learning_window_seconds: 60
+learning_confirmations: 2
+whitelisted_ips: []
+whitelisted_macs: []
+multi_ip_mac_exceptions: []
+burst_threshold: 5
+burst_window_seconds: 10
+alert_cooldown_seconds: 30
+log_file: logs/events.jsonl
+log_level: INFO
+"""
 
 
 def test_first_time_mapping_is_learned(tmp_path):
@@ -177,16 +193,41 @@ def test_log_contains_structured_event_fields(tmp_path):
     import json
 
     event = json.loads(line)
-    assert {"timestamp", "suspicious_ip", "old_mac", "new_mac", "reason", "severity"} <= event.keys()
+    assert {
+        "timestamp", "suspicious_ip", "old_mac", "new_mac", "reason", "severity", "simulated"
+    } <= event.keys()
+    assert event["simulated"] is False
 
 
-def test_logging_failure_does_not_crash_detection(tmp_path):
+def test_logging_failure_is_reported_without_crashing_detection(tmp_path, caplog):
     log_directory = tmp_path / "not-a-file"
     log_directory.mkdir()
     engine = DetectionEngine(config(tmp_path, log_file=str(log_directory)))
+    with caplog.at_level("ERROR", logger="detector.detect"):
+        engine.process_packet(packet())
+        engine.process_packet(packet())
+        assert engine.process_packet(packet(mac="aa:bb:cc:dd:ee:02"))
+
+    assert "Unable to write detector event log" in caplog.text
+
+
+def test_callback_failure_is_reported_without_blocking_other_callbacks(tmp_path, caplog):
+    engine = DetectionEngine(config(tmp_path))
+    received = []
+
+    def failing_callback(event):
+        raise RuntimeError("callback failed")
+
+    engine.on_alert(failing_callback)
+    engine.on_alert(received.append)
     engine.process_packet(packet())
     engine.process_packet(packet())
-    assert engine.process_packet(packet(mac="aa:bb:cc:dd:ee:02"))
+
+    with caplog.at_level("ERROR", logger="detector.detect"):
+        events = engine.process_packet(packet(mac="aa:bb:cc:dd:ee:02"))
+
+    assert received == events
+    assert "Alert callback failed" in caplog.text
 
 
 def test_sniffer_reports_capture_errors_and_stops_cleanly(tmp_path):
@@ -273,3 +314,109 @@ def test_sniffer_wraps_capture_failures(tmp_path, failure, message):
 def test_yaml_configuration_loads():
     loaded = load_config("config/settings.yaml")
     assert loaded.burst_threshold >= 1
+
+
+def test_config_rejects_missing_file(tmp_path):
+    with pytest.raises(ValueError, match="Configuration file not found"):
+        load_config(tmp_path / "missing.yaml")
+
+
+def test_config_rejects_malformed_yaml(tmp_path):
+    path = tmp_path / "settings.yaml"
+    path.write_text("interface: [unterminated", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unable to load configuration"):
+        load_config(path)
+
+
+def test_config_rejects_missing_required_keys(tmp_path):
+    path = tmp_path / "settings.yaml"
+    path.write_text("interface: test0\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="missing required keys"):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("replacement", "message"),
+    [
+        ("interface: ''", "non-empty network interface"),
+        ("learning_window_seconds: -1", "learning_window_seconds.*zero or greater"),
+        ("learning_confirmations: 1.5", "learning_confirmations.*integer"),
+        ("burst_threshold: 0", "burst_threshold.*at least 1"),
+        ("burst_window_seconds: -1", "burst_window_seconds.*zero or greater"),
+        ("alert_cooldown_seconds: nope", "alert_cooldown_seconds.*number"),
+        ("whitelisted_ips: not-a-list", "whitelisted_ips.*list"),
+        ("whitelisted_ips: [not-an-ip]", "whitelisted_ips.*invalid IP"),
+        ("whitelisted_macs: [not-a-mac]", "whitelisted_macs.*invalid MAC"),
+        ("multi_ip_mac_exceptions: [not-a-mac]", "multi_ip_mac_exceptions.*invalid MAC"),
+        ("log_level: VERBOSE", "log_level"),
+    ],
+)
+def test_config_rejects_invalid_values(tmp_path, replacement, message):
+    key = replacement.split(":", 1)[0]
+    path = tmp_path / "settings.yaml"
+    path.write_text(VALID_CONFIG.replace(f"{key}: " + {
+        "interface": "test0",
+        "learning_window_seconds": "60",
+        "learning_confirmations": "2",
+        "burst_threshold": "5",
+        "burst_window_seconds": "10",
+        "alert_cooldown_seconds": "30",
+        "whitelisted_ips": "[]",
+        "whitelisted_macs": "[]",
+        "multi_ip_mac_exceptions": "[]",
+        "log_level": "INFO",
+    }[key], replacement), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_config(path)
+
+
+def test_config_rejects_directory_as_log_file(tmp_path):
+    log_directory = tmp_path / "events"
+    log_directory.mkdir()
+    path = tmp_path / "settings.yaml"
+    path.write_text(VALID_CONFIG.replace("logs/events.jsonl", str(log_directory)), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must be a file, not a directory"):
+        load_config(path)
+
+
+def test_config_rejects_log_file_with_file_parent(tmp_path):
+    parent_file = tmp_path / "not-a-directory"
+    parent_file.write_text("x", encoding="utf-8")
+    path = tmp_path / "settings.yaml"
+    path.write_text(
+        VALID_CONFIG.replace("logs/events.jsonl", str(parent_file / "events.jsonl")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="parent is not a directory"):
+        load_config(path)
+
+
+def test_main_exits_cleanly_for_configuration_error(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "load_config", lambda path: (_ for _ in ()).throw(ValueError("bad interface")))
+
+    assert cli.main() == 2
+    assert "Configuration error: bad interface" in capsys.readouterr().out
+
+
+def test_main_does_not_claim_monitoring_when_capture_startup_fails(monkeypatch, tmp_path, capsys):
+    detector_config = config(tmp_path, interface="test0")
+    monkeypatch.setattr(cli, "load_config", lambda path: detector_config)
+
+    class FailingSniffer:
+        def __init__(self, engine):
+            self.engine = engine
+
+        def start(self, **kwargs):
+            raise RuntimeError("Invalid network interface 'test0'")
+
+    monkeypatch.setattr(cli, "Sniffer", FailingSniffer)
+
+    assert cli.main() == 1
+    output = capsys.readouterr().out
+    assert "Unable to start ARP-Guard: Invalid network interface 'test0'" in output
+    assert "monitoring ARP traffic" not in output

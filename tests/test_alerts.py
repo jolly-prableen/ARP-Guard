@@ -1,7 +1,6 @@
 # tests/test_alerts.py
 import unittest
 from unittest.mock import patch
-import os
 from alerts.notifier import trigger_alert
 
 class TestAlertNotifier(unittest.TestCase):
@@ -22,8 +21,14 @@ class TestAlertNotifier(unittest.TestCase):
         # Verify that the desktop notification function was called
         mock_notify.assert_called_once()
         
-        # Verify that the alerts.log file was successfully created/written to
-        self.assertTrue(os.path.exists("alerts.log"))
+    @patch('alerts.notifier.notification.notify', side_effect=RuntimeError("disabled"))
+    def test_notification_failure_is_logged(self, mock_notify):
+        """Desktop notification failures must not crash the alert callback."""
+        with self.assertLogs('alerts.notifier', level='ERROR') as logs:
+            trigger_alert("192.0.2.50", "00:00:00:00:00:01", "00:00:00:00:00:02")
+
+        mock_notify.assert_called_once()
+        self.assertIn('Desktop notification failed', '\n'.join(logs.output))
 
 if __name__ == '__main__':
     unittest.main()

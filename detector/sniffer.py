@@ -23,28 +23,38 @@ class Sniffer:
         """Process a packet without returning a value to Scapy."""
         self.engine.process_packet(packet)
 
-    def start(self, *, count: int = 0, timeout: int | None = None) -> None:
-        """Start capture and report setup or capture failures."""
+    def _resolve_sniff_func(self) -> Callable[..., Any]:
+        """Validate the configured interface without beginning packet capture."""
         if not self.interface:
             raise RuntimeError(
                 "No network interface configured; set interface in config/settings.yaml"
             )
+        if self._sniff_func is not None:
+            return self._sniff_func
+        try:
+            from scapy.all import get_if_list, sniff
 
-        sniff_func = self._sniff_func
+            if self.interface not in get_if_list():
+                raise RuntimeError(f"Invalid network interface '{self.interface}'")
+            return sniff
+        except ImportError as exc:
+            raise RuntimeError(
+                "Scapy is required for live ARP capture; install requirements.txt"
+            ) from exc
 
-        if sniff_func is None:
-            try:
-                from scapy.all import get_if_list, sniff
+    def validate_interface(self) -> None:
+        """Validate capture prerequisites without invoking Scapy's sniff function."""
+        self._resolve_sniff_func()
 
-                if self.interface not in get_if_list():
-                    raise RuntimeError(
-                        f"Invalid network interface '{self.interface}'"
-                    )
-                sniff_func = sniff
-            except ImportError as exc:
-                raise RuntimeError(
-                    "Scapy is required for live ARP capture; install requirements.txt"
-                ) from exc
+    def start(
+        self,
+        *,
+        count: int = 0,
+        timeout: int | None = None,
+        on_ready: Callable[[], None] | None = None,
+    ) -> None:
+        """Start capture and report setup or capture failures."""
+        sniff_func = self._resolve_sniff_func()
 
         kwargs: dict[str, Any] = {
             "iface": self.interface,
@@ -60,6 +70,8 @@ class Sniffer:
             kwargs["timeout"] = timeout
 
         try:
+            if on_ready is not None:
+                on_ready()
             sniff_func(**kwargs)
         except PermissionError as exc:
             raise RuntimeError(

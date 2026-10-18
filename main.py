@@ -24,6 +24,11 @@ def main() -> int:
     """Load configuration and start passive ARP monitoring."""
     try:
         config = load_config("config/settings.yaml")
+    except ValueError as error:
+        print(f"Configuration error: {error}", flush=True)
+        return 2
+
+    try:
 
         log_level = getattr(
             logging, config.log_level.upper(), logging.INFO
@@ -38,12 +43,12 @@ def main() -> int:
 
         sniffer = Sniffer(engine)
 
-        print(
-            f"ARP-Guard listening on {config.interface}...",
-            flush=True,
+        sniffer.start(
+            on_ready=lambda: print(
+                f"ARP-Guard monitoring ARP traffic on {config.interface}...",
+                flush=True,
+            )
         )
-
-        sniffer.start()
 
     except RuntimeError as error:
         print(f"Unable to start ARP-Guard: {error}", flush=True)

@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARP-Guard | Network Security Dashboard</title>
+    <meta name="description" content="Real-time ARP spoofing detection dashboard. Monitor trusted devices, security alerts, and network activity.">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand"><span class="shield">◆</span> ARP-Guard</div>
+        <p class="side-label">MONITORING</p>
+        <a class="nav active" href="/">▦ &nbsp; Dashboard</a>
+        <a class="nav" href="#alerts">⚠ &nbsp; Security Alerts</a>
+        <a class="nav" href="#events">≡ &nbsp; Event Logs</a>
+        <div class="side-bottom">Passive network monitoring<br><span>ARP Detection Engine</span></div>
+    </aside>
+
+    <main class="main">
+        <header>
+            <div>
+                <p class="eyebrow">NETWORK SECURITY / OVERVIEW</p>
+                <h1>Security Dashboard</h1>
+                <p class="sub">Monitor ARP activity and detect suspicious address mappings.</p>
+            </div>
+            <div class="status" id="status-badge">
+                <span class="dot" id="status-dot"></span>
+                <span id="status">Connecting…</span>
+            </div>
+        </header>
+
+        <section class="banner" id="banner">
+            <div class="banner-icon" id="banner-icon">⟳</div>
+            <div>
+                <strong id="banner-title">Connecting to detector…</strong>
+                <p id="banner-text">Retrieving current state from the detection engine.</p>
+            </div>
+        </section>
+
+        <section class="cards">
+            <article class="metric" id="card-status">
+                <p>DETECTOR STATUS</p>
+                <h2 id="detector-status">Connecting…</h2>
+                <span class="muted" id="detector-status-sub">Python engine</span>
+            </article>
+            <article class="metric">
+                <p>TOTAL ALERTS</p>
+                <h2 id="alert-count">—</h2>
+                <span class="muted">Events reported to dashboard</span>
+            </article>
+            <article class="metric">
+                <p>HIGH SEVERITY</p>
+                <h2 id="high-count">—</h2>
+                <span class="muted" id="severity-breakdown">High-priority alerts</span>
+            </article>
+            <article class="metric">
+                <p>NETWORK INTERFACE</p>
+                <h2 id="interface">—</h2>
+                <span class="muted">Configured capture interface</span>
+            </article>
+        </section>
+
+        <section class="panel" id="devices">
+            <div class="panel-heading">
+                <div>
+                    <h3>Trusted Devices</h3>
+                    <p>Mappings learned by the running detector baseline</p>
+                </div>
+                <div class="tag-group">
+                    <span class="tag" id="baseline-tag">BASELINE</span>
+                    <span class="tag device-count-tag" id="device-count-tag">0 devices</span>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>IP ADDRESS</th><th>MAC ADDRESS</th><th>STATUS</th></tr></thead>
+                    <tbody id="device-table">
+                        <tr><td colspan="3" class="empty">Connecting to detector…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel" id="alerts">
+            <div class="panel-heading">
+                <div><h3>Security Alerts</h3><p>Suspicious ARP activity reported by the detector</p></div>
+                <span class="tag" id="alerts-tag">LIVE VIEW</span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>TIME</th><th>SEVERITY</th><th>EVENT</th><th>DETAILS</th></tr></thead>
+                    <tbody id="alert-table">
+                        <tr><td colspan="4" class="empty">Connecting to detector…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel" id="events">
+            <div class="panel-heading">
+                <div><h3>Recent Events</h3><p>Latest available detector log entries</p></div>
+            </div>
+            <div id="event-list" class="event-list">
+                <div class="empty">Connecting to detector…</div>
+            </div>
+        </section>
+
+        <footer>ARP-Guard · Academic network security project · <span id="clock"></span></footer>
+    </main>
+
+    <script>
+        function updateClock() {
+            document.getElementById("clock").textContent = new Date().toLocaleString();
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+    </script>
+
+<script>
+/* ─── State ──────────────────────────────────────────────────────── */
+let lastFetchOk = false;
+let pollCount = 0;
+
+/* ─── Helpers ────────────────────────────────────────────────────── */
+function escapeHtml(text) {
+    const el = document.createElement('span');
+    el.textContent = text;
+    return el.innerHTML;
+}
+
+function formatTimestamp(ts) {
+    if (!ts) return '—';
+    try {
+        const d = new Date(ts);
+        if (isNaN(d.getTime())) return ts;
+        return d.toLocaleString(undefined, {
+            month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+    } catch {
+        return ts;
+    }
+}
+
+function severityClass(sev) {
+    if (sev === 'high') return 'severity-high';
+    if (sev === 'medium') return 'severity-medium';
+    return 'severity-low';
+}
+
+/* ─── Banner + Status ────────────────────────────────────────────── */
+function updateBanner(data) {
+    const icon = document.getElementById('banner-icon');
+    const title = document.getElementById('banner-title');
+    const text = document.getElementById('banner-text');
+    const banner = document.getElementById('banner');
+
+    banner.className = 'banner';  /* reset */
+
+    if (data.error) {
+        icon.textContent = '✕';
+        title.textContent = 'Capture error';
+        text.textContent = data.error;
+        banner.classList.add('banner-error');
+    } else if (data.starting) {
+        icon.textContent = '⟳';
+        title.textContent = 'Starting capture…';
+        text.textContent = `Interface ${data.interface} was validated. Waiting for ARP capture to initialize.`;
+        banner.classList.add('banner-learning');
+    } else if (data.running && data.learning) {
+        icon.textContent = '⟳';
+        title.textContent = 'Learning baseline…';
+        text.textContent = `Passively observing ARP traffic to build trusted IP-to-MAC mappings (${data.learning_window_seconds}s window).`;
+        banner.classList.add('banner-learning');
+    } else if (data.running) {
+        icon.textContent = '✓';
+        title.textContent = 'Actively monitoring';
+        text.textContent = `Monitoring ARP traffic on ${data.interface}. ${data.trusted_device_count} trusted device${data.trusted_device_count !== 1 ? 's' : ''} in baseline.`;
+        banner.classList.add('banner-ok');
+    } else {
+        icon.textContent = '⏸';
+        title.textContent = 'Monitoring not active';
+        text.textContent = 'The detection engine is loaded but live capture is not running. Start capture or use the test-alert endpoint.';
+    }
+}
+
+function updateStatusBadge(data) {
+    const dot = document.getElementById('status-dot');
+    const label = document.getElementById('status');
+    const badge = document.getElementById('status-badge');
+
+    badge.className = 'status';
+
+    if (data.error) {
+        dot.className = 'dot dot-error';
+        label.textContent = 'Capture error';
+        badge.classList.add('status-error');
+    } else if (data.starting) {
+        dot.className = 'dot dot-active';
+        label.textContent = 'Starting capture';
+        badge.classList.add('status-active');
+    } else if (data.running) {
+        dot.className = 'dot dot-active';
+        label.textContent = data.learning ? 'Learning baseline' : 'Monitoring';
+        badge.classList.add('status-active');
+    } else {
+        dot.className = 'dot dot-idle';
+        label.textContent = 'Monitoring stopped';
+    }
+}
+
+/* ─── Metric Cards ───────────────────────────────────────────────── */
+function updateCards(data) {
+    const detectorStatus = document.getElementById('detector-status');
+    const detectorSub = document.getElementById('detector-status-sub');
+    const cardStatus = document.getElementById('card-status');
+
+    cardStatus.className = 'metric';
+
+    if (data.error) {
+        detectorStatus.textContent = 'Error';
+        detectorSub.textContent = 'Capture failed';
+        cardStatus.classList.add('metric-error');
+    } else if (data.starting) {
+        detectorStatus.textContent = 'Starting';
+        detectorSub.textContent = 'Capture initialization pending';
+        cardStatus.classList.add('metric-learning');
+    } else if (data.running && data.learning) {
+        detectorStatus.textContent = 'Learning';
+        detectorSub.textContent = 'Building baseline';
+        cardStatus.classList.add('metric-learning');
+    } else if (data.running) {
+        detectorStatus.textContent = 'Running';
+        detectorSub.textContent = 'Actively monitoring';
+        cardStatus.classList.add('metric-active');
+    } else {
+        detectorStatus.textContent = 'Stopped';
+        detectorSub.textContent = 'Capture not started';
+    }
+
+    document.getElementById('interface').textContent = data.interface || 'Not configured';
+    document.getElementById('alert-count').textContent = data.alert_count;
+    document.getElementById('high-count').textContent = data.high_count;
+
+    /* severity breakdown subtitle */
+    const parts = [];
+    if (data.high_count > 0) parts.push(`${data.high_count} high`);
+    if (data.medium_count > 0) parts.push(`${data.medium_count} medium`);
+    document.getElementById('severity-breakdown').textContent =
+        parts.length ? parts.join(', ') : 'High-priority alerts';
+}
+
+/* ─── Trusted Devices ────────────────────────────────────────────── */
+function updateDevices(data) {
+    const table = document.getElementById('device-table');
+    const countTag = document.getElementById('device-count-tag');
+    const baselineTag = document.getElementById('baseline-tag');
+
+    countTag.textContent = `${data.trusted_device_count} device${data.trusted_device_count !== 1 ? 's' : ''}`;
+
+    if (data.learning) {
+        baselineTag.textContent = 'LEARNING';
+        baselineTag.className = 'tag tag-learning';
+    } else {
+        baselineTag.textContent = 'BASELINE';
+        baselineTag.className = 'tag';
+    }
+
+    table.replaceChildren();
+
+    if (!data.trusted_devices || !data.trusted_devices.length) {
+        const row = table.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = 3;
+        cell.className = 'empty';
+        if (data.learning) {
+            cell.textContent = 'Learning trusted devices… Baseline will populate as ARP replies are observed.';
+        } else if (data.starting) {
+            cell.textContent = 'Capture startup pending. Trusted devices will appear after ARP replies are observed.';
+        } else if (data.running) {
+            cell.textContent = 'No trusted devices learned yet.';
+        } else if (data.error) {
+            cell.textContent = 'Capture error — unable to learn devices.';
+        } else {
+            cell.textContent = 'No trusted devices learned yet. Start monitoring to begin learning.';
+        }
+        return;
+    }
+
+    for (const device of data.trusted_devices) {
+        const row = table.insertRow();
+        const ipCell = row.insertCell();
+        ipCell.textContent = device.ip;
+        ipCell.className = 'mono';
+
+        const macCell = row.insertCell();
+        macCell.textContent = device.mac;
+        macCell.className = 'mono';
+
+        const statusCell = row.insertCell();
+        statusCell.innerHTML = '<span class="trusted-badge">Trusted</span>';
+    }
+}
+
+/* ─── Alerts ─────────────────────────────────────────────────────── */
+function updateAlerts(data) {
+    const table = document.getElementById('alert-table');
+    const tag = document.getElementById('alerts-tag');
+
+    tag.textContent = data.alert_count > 0
+        ? `${data.alert_count} ALERT${data.alert_count !== 1 ? 'S' : ''}`
+        : 'LIVE VIEW';
+
+    table.replaceChildren();
+
+    if (!data.alerts || !data.alerts.length) {
+        const row = table.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = 4;
+        cell.className = 'empty';
+        if (data.error) {
+            cell.textContent = `Capture error: ${data.error}`;
+        } else if (data.starting) {
+            cell.textContent = 'Capture startup pending — no alerts received yet.';
+        } else if (data.running) {
+            cell.textContent = 'Monitoring active — no alerts received yet.';
+        } else {
+            cell.textContent = 'No alerts received yet.';
+        }
+        return;
+    }
+
+    for (const alert of data.alerts) {
+        const row = table.insertRow();
+        if (alert.simulated) row.classList.add('demo-row');
+
+        /* Timestamp */
+        const timeCell = row.insertCell();
+        timeCell.textContent = formatTimestamp(alert.timestamp);
+        if (alert.simulated) {
+            const simTag = document.createElement('span');
+            simTag.className = 'sim-tag';
+            simTag.textContent = 'SIMULATED';
+            timeCell.appendChild(document.createTextNode(' '));
+            timeCell.appendChild(simTag);
+        }
+
+        /* Severity */
+        const sevCell = row.insertCell();
+        const sevBadge = document.createElement('span');
+        sevBadge.className = `severity-badge ${severityClass(alert.severity)}`;
+        sevBadge.textContent = (alert.severity || 'unknown').toUpperCase();
+        sevCell.appendChild(sevBadge);
+
+        /* Event reason */
+        const reasonCell = row.insertCell();
+        reasonCell.textContent = alert.reason || 'ARP alert';
+
+        /* Details */
+        const detailCell = row.insertCell();
+        detailCell.className = 'mono';
+        const ip = alert.suspicious_ip || '—';
+        const oldMac = alert.old_mac || '—';
+        const newMac = alert.new_mac || '—';
+        detailCell.textContent = `${ip}  ${oldMac} → ${newMac}`;
+    }
+}
+
+/* ─── Event Logs ─────────────────────────────────────────────────── */
+async function updateEventLogs() {
+    const eventList = document.getElementById('event-list');
+
+    try {
+        const response = await fetch('/api/logs');
+        if (!response.ok) throw new Error('Logs API unavailable');
+        const logs = await response.json();
+
+        eventList.replaceChildren();
+
+        if (!logs.length) {
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.textContent = 'No logged events yet.';
+            eventList.appendChild(empty);
+            return;
+        }
+
+        for (const event of logs.slice(0, 15)) {
+            const item = document.createElement('div');
+            item.className = 'event-row';
+
+            const time = document.createElement('span');
+            time.className = 'event-time';
+            time.textContent = formatTimestamp(event.timestamp);
+
+            const sev = document.createElement('span');
+            sev.className = `severity-badge ${severityClass(event.severity)}`;
+            sev.textContent = (event.severity || '').toUpperCase();
+
+            const reason = document.createElement('span');
+            reason.className = 'event-reason';
+            reason.textContent = `${event.reason || ''} (${event.suspicious_ip || ''})`;
+
+            if (event.simulated) {
+                const simTag = document.createElement('span');
+                simTag.className = 'sim-tag';
+                simTag.textContent = 'SIMULATED';
+                item.appendChild(simTag);
+                item.appendChild(document.createTextNode(' '));
+            }
+
+            item.appendChild(time);
+            item.appendChild(document.createTextNode(' '));
+            item.appendChild(sev);
+            item.appendChild(document.createTextNode(' '));
+            item.appendChild(reason);
+
+            eventList.appendChild(item);
+        }
+    } catch {
+        eventList.replaceChildren();
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'Unable to load event logs.';
+        eventList.appendChild(empty);
+    }
+}
+
+/* ─── Main Poll ──────────────────────────────────────────────────── */
+async function refreshDashboard() {
+    pollCount++;
+    const statusLabel = document.getElementById('status');
+
+    try {
+        const response = await fetch('/api/status');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        lastFetchOk = true;
+
+        updateBanner(data);
+        updateStatusBadge(data);
+        updateCards(data);
+        updateDevices(data);
+        updateAlerts(data);
+        await updateEventLogs();
+
+    } catch (error) {
+        lastFetchOk = false;
+
+        /* Status badge */
+        document.getElementById('status-dot').className = 'dot dot-error';
+        statusLabel.textContent = 'Backend unavailable';
+        document.getElementById('status-badge').className = 'status status-error';
+
+        /* Banner */
+        document.getElementById('banner-icon').textContent = '✕';
+        document.getElementById('banner-title').textContent = 'Backend unavailable';
+        document.getElementById('banner-text').textContent =
+            'Unable to connect to the ARP-Guard backend. Ensure the Flask server is running on port 5001.';
+        document.getElementById('banner').className = 'banner banner-error';
+
+        /* Cards */
+        document.getElementById('detector-status').textContent = 'Unavailable';
+        document.getElementById('detector-status-sub').textContent = 'Cannot reach backend';
+        document.getElementById('alert-count').textContent = '—';
+        document.getElementById('high-count').textContent = '—';
+        document.getElementById('interface').textContent = '—';
+
+        /* Tables */
+        for (const id of ['device-table', 'alert-table']) {
+            const table = document.getElementById(id);
+            table.replaceChildren();
+            const row = table.insertRow();
+            const cell = row.insertCell();
+            cell.colSpan = id === 'device-table' ? 3 : 4;
+            cell.className = 'empty';
+            cell.textContent = 'Unable to reach the detection backend.';
+        }
+
+        const eventList = document.getElementById('event-list');
+        eventList.replaceChildren();
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'Unable to reach the detection backend.';
+        eventList.appendChild(empty);
+    }
+}
+
+refreshDashboard();
+setInterval(refreshDashboard, 3000);
+</script>
+
+</body>
+</html>

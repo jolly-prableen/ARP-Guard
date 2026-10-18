@@ -1,4 +1,3 @@
-# alerts/notifier.py
 import logging
 from colorama import Fore, Style, init
 from plyer import notification
@@ -6,12 +5,7 @@ from plyer import notification
 # Initialize colorama so terminal colors work correctly on Windows
 init(autoreset=True)
 
-# Set up logging to save historical alerts into a file named alerts.log
-logging.basicConfig(
-    filename="alerts.log",
-    level=logging.WARNING,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logger = logging.getLogger(__name__)
 
 def trigger_alert(suspicious_ip, old_mac, new_mac, reason="ARP Spoofing Detected"):
     """
@@ -22,10 +16,8 @@ def trigger_alert(suspicious_ip, old_mac, new_mac, reason="ARP Spoofing Detected
     # 1. Print formatted warning in bright red text to your terminal window
     print(f"{Fore.RED}{Style.BRIGHT}{msg}{Style.RESET_ALL}")
     
-    # 2. Automatically save the alert details into 'alerts.log'
-    logging.warning(msg)
-    
-    # 3. Trigger a desktop pop-up notification banner on Windows
+    # The detector owns JSONL persistence so CLI and dashboard share one history.
+    # Trigger a desktop pop-up notification banner on Windows.
     try:
         notification.notify(
             title="⚠️ ARP Spoofing Detected!",
@@ -34,4 +26,4 @@ def trigger_alert(suspicious_ip, old_mac, new_mac, reason="ARP Spoofing Detected
             timeout=5
         )
     except Exception:
-        pass  # Fails silently if desktop notifications are turned off on your system
+        logger.exception("Desktop notification failed for %s", suspicious_ip)
